@@ -24,12 +24,24 @@ jobs:
       - name: Generate native project
         run: npx expo prebuild --platform ios --clean
 
-      - name: Build unsigned IPA
+      - name: Find workspace name
         run: |
           cd ios
+          echo "=== Contents of ios/ ==="
+          ls -la
+          WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1 | sed 's|./||')
+          SCHEME=$(echo "$WORKSPACE" | sed 's/.xcworkspace//')
+          echo "WORKSPACE=$WORKSPACE" >> $GITHUB_ENV
+          echo "SCHEME=$SCHEME" >> $GITHUB_ENV
+          echo "Found workspace: $WORKSPACE, scheme: $SCHEME"
+
+      - name: Build unsigned app
+        run: |
+          cd ios
+          pod install
           xcodebuild \
-            -workspace messengertwin.xcworkspace \
-            -scheme messengertwin \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
             -arch arm64 \
@@ -38,9 +50,15 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE="" \
-            | tail -20
+            | xcpretty || true
+
+      - name: Package IPA
+        run: |
+          cd ios
+          APP_PATH=$(find build -name "*.app" -type d | head -1)
+          echo "Found app at: $APP_PATH"
           mkdir -p build/Payload
-          cp -r build/Build/Products/Release-iphoneos/messengertwin.app build/Payload/
+          cp -r "$APP_PATH" build/Payload/
           cd build
           zip -r MessengerTwin.ipa Payload
 
