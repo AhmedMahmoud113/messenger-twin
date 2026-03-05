@@ -1,0 +1,56 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate native project
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Build unsigned IPA
+        run: |
+          cd ios
+
+          # Build the .app (unsigned, for simulator won't work — we need device arch)
+          xcodebuild \
+            -workspace messengertwin.xcworkspace \
+            -scheme messengertwin \
+            -configuration Release \
+            -sdk iphoneos \
+            -arch arm64 \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE="" \
+            | tail -20
+
+          # Package as IPA
+          mkdir -p build/Payload
+          cp -r build/Build/Products/Release-iphoneos/messengertwin.app build/Payload/
+          cd build
+          zip -r MessengerTwin.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MessengerTwin-IPA
+          path: ios/build/MessengerTwin.ipa
+          retention-days: 30
