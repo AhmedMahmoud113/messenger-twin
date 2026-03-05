@@ -24,21 +24,35 @@ jobs:
       - name: Generate native project
         run: npx expo prebuild --platform ios --clean
 
-      - name: Find workspace name
+      - name: Disable code signing in project
         run: |
           cd ios
-          echo "=== Contents of ios/ ==="
+          # Disable automatic signing in pbxproj
+          sed -i '' 's/CODE_SIGN_IDENTITY = "Apple Development"/CODE_SIGN_IDENTITY = ""/g' *.xcodeproj/project.pbxproj
+          sed -i '' 's/CODE_SIGN_IDENTITY = "iPhone Developer"/CODE_SIGN_IDENTITY = ""/g' *.xcodeproj/project.pbxproj
+          sed -i '' 's/CODE_SIGN_IDENTITY = "iPhone Distribution"/CODE_SIGN_IDENTITY = ""/g' *.xcodeproj/project.pbxproj
+          sed -i '' 's/"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = "iPhone Developer"/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = ""/g' *.xcodeproj/project.pbxproj
+          sed -i '' 's/DEVELOPMENT_TEAM = "[^"]*"/DEVELOPMENT_TEAM = ""/g' *.xcodeproj/project.pbxproj
+          sed -i '' 's/ProvisioningStyle = Automatic/ProvisioningStyle = Manual/g' *.xcodeproj/project.pbxproj
+          # Also patch Pods if exists
+          if [ -f Podfile ]; then
+            pod install
+          fi
+          echo "✅ Code signing disabled"
+
+      - name: Find workspace
+        run: |
+          cd ios
           ls -la
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1 | sed 's|./||')
           SCHEME=$(echo "$WORKSPACE" | sed 's/.xcworkspace//')
           echo "WORKSPACE=$WORKSPACE" >> $GITHUB_ENV
           echo "SCHEME=$SCHEME" >> $GITHUB_ENV
-          echo "Found workspace: $WORKSPACE, scheme: $SCHEME"
+          echo "Found: $WORKSPACE / $SCHEME"
 
-      - name: Build unsigned app
+      - name: Build app
         run: |
           cd ios
-          pod install
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
@@ -49,22 +63,25 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
             PROVISIONING_PROFILE="" \
-            | xcpretty || true
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEVELOPMENT_TEAM="" \
+            -allowProvisioningUpdates=NO \
+            2>&1 | tail -50
 
       - name: Package IPA
         run: |
           cd ios
           APP_PATH=$(find build -name "*.app" -type d | head -1)
-          echo "Found app at: $APP_PATH"
-          mkdir -p build/Payload
-          cp -r "$APP_PATH" build/Payload/
-          cd build
+          echo "Found app: $APP_PATH"
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
           zip -r MessengerTwin.ipa Payload
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: MessengerTwin-IPA
-          path: ios/build/MessengerTwin.ipa
+          path: ios/MessengerTwin.ipa
           retention-days: 30
