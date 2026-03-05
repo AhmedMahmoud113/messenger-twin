@@ -1,29 +1,47 @@
 {
   "expo": {
-    "name": "messenger-twin",
+    "name": "Messenger 1",
     "slug": "messenger-twin",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
     "ios": {
-      "supportsTablet": true
-    },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+      "supportsTablet": true,
+      "bundleIdentifier": "com.messenger.twin1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Messenger needs camera access for video calls",
+        "NSMicrophoneUsageDescription": "Messenger needs microphone access for voice and video calls",
+        "NSPhotoLibraryUsageDescription": "Messenger needs photo library access to send photos",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
+    "android": {
+      "package": "com.messenger.twin1",
+      "adaptiveIcon": {
+        "backgroundColor": "#000000",
+        "foregroundImage": "./assets/icon.png"
+      },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
     "web": {
-      "favicon": "./assets/favicon.png"
-    }
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [],
+    "extra": {
+      "eas": {
+        "projectId": "653acc16-603e-4ec2-8f20-cfb52cb21aa0"
+      }
+    },
+    "owner": "virus113"
   }
 }
