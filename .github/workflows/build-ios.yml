@@ -24,57 +24,79 @@ jobs:
       - name: Generate native project
         run: npx expo prebuild --platform ios --clean
 
-      - name: Disable code signing in project
+      - name: Disable ALL code signing
         run: |
           cd ios
-          # Disable automatic signing in pbxproj
-          sed -i '' 's/CODE_SIGN_IDENTITY = "Apple Development"/CODE_SIGN_IDENTITY = ""/g' *.xcodeproj/project.pbxproj
-          sed -i '' 's/CODE_SIGN_IDENTITY = "iPhone Developer"/CODE_SIGN_IDENTITY = ""/g' *.xcodeproj/project.pbxproj
-          sed -i '' 's/CODE_SIGN_IDENTITY = "iPhone Distribution"/CODE_SIGN_IDENTITY = ""/g' *.xcodeproj/project.pbxproj
-          sed -i '' 's/"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = "iPhone Developer"/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = ""/g' *.xcodeproj/project.pbxproj
-          sed -i '' 's/DEVELOPMENT_TEAM = "[^"]*"/DEVELOPMENT_TEAM = ""/g' *.xcodeproj/project.pbxproj
-          sed -i '' 's/ProvisioningStyle = Automatic/ProvisioningStyle = Manual/g' *.xcodeproj/project.pbxproj
-          # Also patch Pods if exists
-          if [ -f Podfile ]; then
-            pod install
-          fi
-          echo "✅ Code signing disabled"
 
-      - name: Find workspace
+          # 1. Disable signing in main project
+          find . -name "project.pbxproj" | while read f; do
+            echo "Patching: $f"
+            sed -i '' 's/CODE_SIGN_IDENTITY = "[^"]*"/CODE_SIGN_IDENTITY = ""/g' "$f"
+            sed -i '' 's/DEVELOPMENT_TEAM = "[^"]*"/DEVELOPMENT_TEAM = ""/g' "$f"
+            sed -i '' 's/ProvisioningStyle = Automatic/ProvisioningStyle = Manual/g' "$f"
+            sed -i '' 's/PROVISIONING_PROFILE_SPECIFIER = "[^"]*"/PROVISIONING_PROFILE_SPECIFIER = ""/g' "$f"
+          done
+
+          # 2. Add post_install to Podfile to disable signing for ALL pods
+          cat >> Podfile << 'PATCH'
+
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              target.build_configurations.each do |config|
+                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                config.build_settings['CODE_SIGN_IDENTITY'] = ''
+                config.build_settings['EXPANDED_CODE_SIGN_IDENTITY'] = ''
+                config.build_settings['DEVELOPMENT_TEAM'] = ''
+              end
+            end
+          end
+          PATCH
+
+          # 3. Re-install pods with new settings
+          pod install
+
+          echo "✅ All signing disabled for all targets"
+
+      - name: Find workspace and scheme
         run: |
           cd ios
-          ls -la
           WORKSPACE=$(find . -name "*.xcworkspace" -maxdepth 1 | head -1 | sed 's|./||')
-          SCHEME=$(echo "$WORKSPACE" | sed 's/.xcworkspace//')
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null | grep -A1 "Schemes:" | tail -1 | xargs)
           echo "WORKSPACE=$WORKSPACE" >> $GITHUB_ENV
           echo "SCHEME=$SCHEME" >> $GITHUB_ENV
-          echo "Found: $WORKSPACE / $SCHEME"
+          echo "✅ Workspace: $WORKSPACE | Scheme: $SCHEME"
 
-      - name: Build app
+      - name: Build
         run: |
           cd ios
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
-            -sdk iphoneos \
-            -arch arm64 \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            PROVISIONING_PROFILE="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
+            CODE_SIGN_IDENTITY="-" \
             DEVELOPMENT_TEAM="" \
-            -allowProvisioningUpdates=NO \
-            2>&1 | tail -50
+            PROVISIONING_PROFILE="" \
+            ENABLE_BITCODE=NO \
+            2>&1 | tee build.log | tail -80
+
+      - name: Show errors if failed
+        if: failure()
+        run: |
+          echo "=== LAST 100 LINES ==="
+          tail -100 ios/build.log
+          echo "=== ERRORS ==="
+          grep -i "error:" ios/build.log || true
 
       - name: Package IPA
         run: |
           cd ios
           APP_PATH=$(find build -name "*.app" -type d | head -1)
-          echo "Found app: $APP_PATH"
+          echo "✅ Found app: $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r MessengerTwin.ipa Payload
