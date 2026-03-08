@@ -24,33 +24,91 @@ jobs:
       - name: Generate native project
         run: npx expo prebuild --platform ios --clean
 
-      - name: Build unsigned IPA
+      - name: Install CocoaPods
         run: |
           cd ios
+          pod install
 
-          # Build the .app (unsigned, for simulator won't work — we need device arch)
+      - name: Find workspace and scheme
+        id: find-xcode
+        run: |
+          set -e
+          WORKSPACE=$(find ios -name "*.xcworkspace" -maxdepth 1 | head -1)
+          if [ -z "$WORKSPACE" ]; then
+            echo "❌ No .xcworkspace found in ios/"
+            ls -la ios/
+            exit 1
+          fi
+          echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
+
+          # Extract scheme name from workspace (remove path and extension)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
+
+          echo "✅ Found workspace: $WORKSPACE"
+          echo "✅ Using scheme: $SCHEME"
+
+      - name: Build .app (unsigned)
+        run: |
+          set -e
+          set -o pipefail
+
           xcodebuild \
-            -workspace messengertwin.xcworkspace \
-            -scheme messengertwin \
+            -workspace "${{ steps.find-xcode.outputs.workspace }}" \
+            -scheme "${{ steps.find-xcode.outputs.scheme }}" \
             -configuration Release \
             -sdk iphoneos \
             -arch arm64 \
-            -derivedDataPath build \
+            -derivedDataPath ios/build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE="" \
-            | tail -20
+            2>&1 | tee build.log | tail -50
 
-          # Package as IPA
-          mkdir -p build/Payload
-          cp -r build/Build/Products/Release-iphoneos/messengertwin.app build/Payload/
-          cd build
+          echo ""
+          echo "✅ xcodebuild finished successfully"
+
+      - name: Package IPA
+        run: |
+          set -e
+
+          # Find the .app in the build output
+          APP_PATH=$(find ios/build/Build/Products -name "*.app" -type d | head -1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ No .app found in build output"
+            echo "Build output contents:"
+            find ios/build/Build/Products -type d 2>/dev/null || echo "No Products directory found"
+            echo ""
+            echo "Last 100 lines of build log:"
+            tail -100 build.log 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "✅ Found app: $APP_PATH"
+          APP_SIZE=$(du -sh "$APP_PATH" | cut -f1)
+          echo "📦 App size: $APP_SIZE"
+
+          # Create Payload structure and zip as IPA
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
           zip -r MessengerTwin.ipa Payload
+
+          IPA_SIZE=$(du -sh MessengerTwin.ipa | cut -f1)
+          echo "📦 IPA size: $IPA_SIZE"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: MessengerTwin-IPA
-          path: ios/build/MessengerTwin.ipa
-          retention-days: 30
+          path: MessengerTwin.ipa
+          retention-days: 90
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
