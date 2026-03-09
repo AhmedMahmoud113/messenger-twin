@@ -28,45 +28,72 @@ jobs:
         run: |
           cd ios
 
-          echo "--- Original Podfile (last 30 lines) ---"
+          # Replace the closing of post_install block to inject our settings AFTER react_native_post_install
+          # The pattern is:
+          #   post_install do |installer|
+          #     react_native_post_install(...)
+          #   end        <-- we inject before this 'end'
+          # end
+
+          python3 << 'PYEOF'
+          import re
+
+          with open('Podfile', 'r') as f:
+              content = f.read()
+
+          # Find the post_install block and inject our code before the closing 'end'
+          # The post_install block ends with two consecutive 'end' statements
+          patch_code = """
+    # --- Fix Swift 6 strict concurrency for all pod targets ---
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+        config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+        config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+        config.build_settings['CODE_SIGN_IDENTITY'] = ''
+      end
+    end
+    # --- End fix ---
+"""
+
+          # Insert before the last 'end' inside post_install (before the "  end\nend" pattern)
+          # Match the react_native_post_install call and its closing parenthesis, then inject after
+          pattern = r'(react_native_post_install\([^)]*\).*?\))'
+          match = re.search(pattern, content, re.DOTALL)
+
+          if match:
+              insert_pos = match.end()
+              content = content[:insert_pos] + '\n' + patch_code + content[insert_pos:]
+              print("Injected after react_native_post_install()")
+          else:
+              # Fallback: inject before the last two 'end' statements
+              pattern2 = r'(\s+end\nend\s*$)'
+              match2 = re.search(pattern2, content)
+              if match2:
+                  content = content[:match2.start()] + '\n' + patch_code + content[match2.start():]
+                  print("Injected before closing end statements")
+              else:
+                  # Last resort: append post_install
+                  content += """
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+      config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+      config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+      config.build_settings['CODE_SIGN_IDENTITY'] = ''
+    end
+  end
+end
+"""
+                  print("Appended new post_install block")
+
+          with open('Podfile', 'w') as f:
+              f.write(content)
+          PYEOF
+
+          echo "--- Patched Podfile (last 30 lines) ---"
           tail -30 Podfile
-          echo "---"
-
-          # Check if post_install already exists
-          if grep -q "post_install" Podfile; then
-            echo "post_install block found, injecting settings..."
-            # Insert our settings right after the post_install line
-            sed -i '' '/post_install do |installer|/a\
-            # --- Fix Swift 6 strict concurrency ---\
-            installer.pods_project.targets.each do |target|\
-              target.build_configurations.each do |config|\
-                config.build_settings["SWIFT_STRICT_CONCURRENCY"] = "minimal"\
-                config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"\
-                config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"\
-                config.build_settings["CODE_SIGN_IDENTITY"] = ""\
-              end\
-            end\
-            # --- End fix ---
-            ' Podfile
-          else
-            echo "No post_install found, appending one..."
-            cat >> Podfile << 'PATCH'
-
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              target.build_configurations.each do |config|
-                config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
-                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-                config.build_settings['CODE_SIGN_IDENTITY'] = ''
-              end
-            end
-          end
-          PATCH
-          fi
-
-          echo "--- Patched Podfile (last 40 lines) ---"
-          tail -40 Podfile
 
       - name: Install CocoaPods
         run: |
