@@ -24,43 +24,29 @@ jobs:
       - name: Generate native project
         run: npx expo prebuild --platform ios --clean
 
-      - name: Patch Podfile for Swift concurrency
-        run: |
-          cd ios
-          # Inject SWIFT_STRICT_CONCURRENCY=minimal into Podfile AFTER react_native_post_install
-          # Using sed to add settings before the closing "end" of post_install block
-          PATCH='    installer.pods_project.targets.each do |target|\n      target.build_configurations.each do |config|\n        config.build_settings['"'"'SWIFT_STRICT_CONCURRENCY'"'"'] = '"'"'minimal'"'"'\n        config.build_settings['"'"'CODE_SIGNING_ALLOWED'"'"'] = '"'"'NO'"'"'\n        config.build_settings['"'"'CODE_SIGNING_REQUIRED'"'"'] = '"'"'NO'"'"'\n        config.build_settings['"'"'CODE_SIGN_IDENTITY'"'"'] = '"'"''"'"'\n      end\n    end'
-          # Find the line number of the last "end" before the final "end" in post_install
-          # Strategy: find react_native_post_install closing paren, add after it
-          LINE=$(grep -n "react_native_post_install" Podfile | tail -1 | cut -d: -f1)
-          if [ -n "$LINE" ]; then
-            # Find the closing paren ")" after react_native_post_install
-            CLOSE_LINE=$(tail -n +"$LINE" Podfile | grep -n ")" | head -1 | cut -d: -f1)
-            INSERT_AT=$((LINE + CLOSE_LINE))
-            sed -i '' "${INSERT_AT}a\\
-            # --- Fix Swift 6 strict concurrency ---\\
-            installer.pods_project.targets.each do |target|\\
-              target.build_configurations.each do |config|\\
-                config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'\\
-                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'\\
-                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'\\
-                config.build_settings['CODE_SIGN_IDENTITY'] = ''\\
-              end\\
-            end\\
-            # --- End fix ---
-          " Podfile
-            echo "Injected after react_native_post_install at line $INSERT_AT"
-          else
-            echo "react_native_post_install not found, appending post_install block"
-            printf '\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings["SWIFT_STRICT_CONCURRENCY"] = "minimal"\n      config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"\n    end\n  end\nend\n' >> Podfile
-          fi
-          echo "--- Patched Podfile (last 25 lines) ---"
-          tail -25 Podfile
-
       - name: Install CocoaPods
         run: |
           cd ios
           pod install
+
+      - name: Fix Swift 6 strict concurrency in Pods
+        run: |
+          cd ios
+          echo "=== Patching xcconfig files to disable strict concurrency ==="
+          find Pods/Target\ Support\ Files -name "*.xcconfig" -exec grep -l "SWIFT" {} \; | head -20 || true
+          # Add SWIFT_STRICT_CONCURRENCY=minimal to ALL pod xcconfig files
+          find Pods/Target\ Support\ Files -name "*.xcconfig" | while read f; do
+            if ! grep -q "SWIFT_STRICT_CONCURRENCY" "$f"; then
+              echo "SWIFT_STRICT_CONCURRENCY = minimal" >> "$f"
+            fi
+          done
+          echo "Patched xcconfig files"
+          # Also patch all pbxproj files in Pods to add the setting
+          find Pods -name "project.pbxproj" | while read f; do
+            sed -i '' 's/SWIFT_OPTIMIZATION_LEVEL/SWIFT_STRICT_CONCURRENCY = minimal; SWIFT_OPTIMIZATION_LEVEL/g' "$f"
+            echo "Patched: $f"
+          done
+          echo "=== Done ==="
 
       - name: Find workspace and scheme
         id: find-xcode
