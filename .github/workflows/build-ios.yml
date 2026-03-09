@@ -41,10 +41,10 @@ jobs:
             echo "Swift version settings before:"
             grep -c "SWIFT_VERSION = 6" "$PBXPROJ" || echo "0 instances of SWIFT_VERSION = 6"
             grep -c "SWIFT_VERSION = 5" "$PBXPROJ" || echo "0 instances of SWIFT_VERSION = 5"
-            # Replace Swift 6 with Swift 5
-            sed -i '' 's/SWIFT_VERSION = 6;/SWIFT_VERSION = 5;/g' "$PBXPROJ"
+            # Replace any Swift 6.x version with Swift 5
+            sed -i '' 's/SWIFT_VERSION = 6[^;]*/SWIFT_VERSION = 5/g' "$PBXPROJ"
             echo "Swift version settings after:"
-            grep -c "SWIFT_VERSION = 6" "$PBXPROJ" || echo "0 instances of SWIFT_VERSION = 6"
+            grep "SWIFT_VERSION = 6" "$PBXPROJ" | head -3 || echo "0 instances of SWIFT_VERSION = 6"
             grep -c "SWIFT_VERSION = 5" "$PBXPROJ" || echo "0 instances of SWIFT_VERSION = 5"
           else
             echo "WARNING: $PBXPROJ not found!"
