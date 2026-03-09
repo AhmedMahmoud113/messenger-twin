@@ -21,6 +21,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Patch expo-modules-core Swift 6 issues
+        run: |
+          echo "=== Patching expo-modules-core Swift 6 compatibility ==="
+          # These files use @MainActor on protocol conformances which is Swift 6-only
+          # Fix 1: SwiftUIHostingView.swift line 45 - remove @MainActor from protocol conformance
+          FILE1="node_modules/expo-modules-core/ios/Core/Views/SwiftUI/SwiftUIHostingView.swift"
+          if [ -f "$FILE1" ]; then
+            sed -i '' 's/@MainActor AnyExpoSwiftUIHostingView/AnyExpoSwiftUIHostingView/g' "$FILE1"
+            echo "Patched: $FILE1"
+          fi
+          # Fix 2: ViewDefinition.swift line 121 - remove @MainActor attribute
+          FILE2="node_modules/expo-modules-core/ios/Core/Views/ViewDefinition.swift"
+          if [ -f "$FILE2" ]; then
+            sed -i '' 's/: @MainActor AnyArgument/: AnyArgument/g' "$FILE2"
+            echo "Patched: $FILE2"
+          fi
+          echo "=== Done ==="
+
       - name: Generate native project
         run: npx expo prebuild --platform ios --clean
 
@@ -28,24 +46,6 @@ jobs:
         run: |
           cd ios
           pod install
-
-      - name: Force Swift 5 mode for all Pods
-        run: |
-          cd ios
-          echo "=== Forcing Swift 5 language mode for all pod targets ==="
-          # Patch all xcconfig files to force Swift 5
-          find Pods/Target\ Support\ Files -name "*.xcconfig" | while read f; do
-            echo "SWIFT_VERSION = 5.9" >> "$f"
-            echo "SWIFT_STRICT_CONCURRENCY = minimal" >> "$f"
-          done
-          echo "Patched all xcconfig files"
-          # Also set SWIFT_VERSION in all pbxproj
-          find Pods -name "project.pbxproj" | while read f; do
-            # Replace any existing SWIFT_VERSION setting
-            sed -i '' 's/SWIFT_VERSION = [0-9.]*;/SWIFT_VERSION = 5.9;/g' "$f"
-            echo "Set SWIFT_VERSION=5.0 in: $f"
-          done
-          echo "=== Done ==="
 
       - name: Find workspace and scheme
         id: find-xcode
@@ -78,8 +78,6 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE="" \
-            SWIFT_VERSION=5.9 \
-            SWIFT_STRICT_CONCURRENCY=minimal \
             2>&1 | tee build.log | tail -50
           echo ""
           echo "xcodebuild finished successfully"
