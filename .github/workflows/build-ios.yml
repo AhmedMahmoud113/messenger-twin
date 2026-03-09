@@ -27,73 +27,35 @@ jobs:
       - name: Patch Podfile for Swift concurrency
         run: |
           cd ios
-
-          # Replace the closing of post_install block to inject our settings AFTER react_native_post_install
-          # The pattern is:
-          #   post_install do |installer|
-          #     react_native_post_install(...)
-          #   end        <-- we inject before this 'end'
-          # end
-
-          python3 << 'PYEOF'
-          import re
-
-          with open('Podfile', 'r') as f:
-              content = f.read()
-
-          # Find the post_install block and inject our code before the closing 'end'
-          # The post_install block ends with two consecutive 'end' statements
-          patch_code = """
-    # --- Fix Swift 6 strict concurrency for all pod targets ---
-    installer.pods_project.targets.each do |target|
-      target.build_configurations.each do |config|
-        config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
-        config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-        config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-        config.build_settings['CODE_SIGN_IDENTITY'] = ''
-      end
-    end
-    # --- End fix ---
-"""
-
-          # Insert before the last 'end' inside post_install (before the "  end\nend" pattern)
-          # Match the react_native_post_install call and its closing parenthesis, then inject after
-          pattern = r'(react_native_post_install\([^)]*\).*?\))'
-          match = re.search(pattern, content, re.DOTALL)
-
-          if match:
-              insert_pos = match.end()
-              content = content[:insert_pos] + '\n' + patch_code + content[insert_pos:]
-              print("Injected after react_native_post_install()")
-          else:
-              # Fallback: inject before the last two 'end' statements
-              pattern2 = r'(\s+end\nend\s*$)'
-              match2 = re.search(pattern2, content)
-              if match2:
-                  content = content[:match2.start()] + '\n' + patch_code + content[match2.start():]
-                  print("Injected before closing end statements")
-              else:
-                  # Last resort: append post_install
-                  content += """
-post_install do |installer|
-  installer.pods_project.targets.each do |target|
-    target.build_configurations.each do |config|
-      config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
-      config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-      config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-      config.build_settings['CODE_SIGN_IDENTITY'] = ''
-    end
-  end
-end
-"""
-                  print("Appended new post_install block")
-
-          with open('Podfile', 'w') as f:
-              f.write(content)
-          PYEOF
-
-          echo "--- Patched Podfile (last 30 lines) ---"
-          tail -30 Podfile
+          # Inject SWIFT_STRICT_CONCURRENCY=minimal into Podfile AFTER react_native_post_install
+          # Using sed to add settings before the closing "end" of post_install block
+          PATCH='    installer.pods_project.targets.each do |target|\n      target.build_configurations.each do |config|\n        config.build_settings['"'"'SWIFT_STRICT_CONCURRENCY'"'"'] = '"'"'minimal'"'"'\n        config.build_settings['"'"'CODE_SIGNING_ALLOWED'"'"'] = '"'"'NO'"'"'\n        config.build_settings['"'"'CODE_SIGNING_REQUIRED'"'"'] = '"'"'NO'"'"'\n        config.build_settings['"'"'CODE_SIGN_IDENTITY'"'"'] = '"'"''"'"'\n      end\n    end'
+          # Find the line number of the last "end" before the final "end" in post_install
+          # Strategy: find react_native_post_install closing paren, add after it
+          LINE=$(grep -n "react_native_post_install" Podfile | tail -1 | cut -d: -f1)
+          if [ -n "$LINE" ]; then
+            # Find the closing paren ")" after react_native_post_install
+            CLOSE_LINE=$(tail -n +"$LINE" Podfile | grep -n ")" | head -1 | cut -d: -f1)
+            INSERT_AT=$((LINE + CLOSE_LINE))
+            sed -i '' "${INSERT_AT}a\\
+            # --- Fix Swift 6 strict concurrency ---\\
+            installer.pods_project.targets.each do |target|\\
+              target.build_configurations.each do |config|\\
+                config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'\\
+                config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'\\
+                config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'\\
+                config.build_settings['CODE_SIGN_IDENTITY'] = ''\\
+              end\\
+            end\\
+            # --- End fix ---
+          " Podfile
+            echo "Injected after react_native_post_install at line $INSERT_AT"
+          else
+            echo "react_native_post_install not found, appending post_install block"
+            printf '\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n    target.build_configurations.each do |config|\n      config.build_settings["SWIFT_STRICT_CONCURRENCY"] = "minimal"\n      config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"\n    end\n  end\nend\n' >> Podfile
+          fi
+          echo "--- Patched Podfile (last 25 lines) ---"
+          tail -25 Podfile
 
       - name: Install CocoaPods
         run: |
@@ -111,10 +73,8 @@ end
             exit 1
           fi
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
-
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
-
           echo "Found workspace: $WORKSPACE"
           echo "Using scheme: $SCHEME"
 
@@ -122,7 +82,6 @@ end
         run: |
           set -e
           set -o pipefail
-
           xcodebuild \
             -workspace "${{ steps.find-xcode.outputs.workspace }}" \
             -scheme "${{ steps.find-xcode.outputs.scheme }}" \
@@ -136,33 +95,25 @@ end
             PROVISIONING_PROFILE="" \
             SWIFT_STRICT_CONCURRENCY=minimal \
             2>&1 | tee build.log | tail -50
-
           echo ""
           echo "xcodebuild finished successfully"
 
       - name: Package IPA
         run: |
           set -e
-
           APP_PATH=$(find ios/build/Build/Products -name "*.app" -type d | head -1)
-
           if [ -z "$APP_PATH" ]; then
             echo "No .app found in build output"
             find ios/build/Build/Products -type d 2>/dev/null || echo "No Products directory found"
-            echo ""
-            echo "Last 100 lines of build log:"
             tail -100 build.log 2>/dev/null || true
             exit 1
           fi
-
           echo "Found app: $APP_PATH"
           APP_SIZE=$(du -sh "$APP_PATH" | cut -f1)
           echo "App size: $APP_SIZE"
-
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r MessengerTwin.ipa Payload
-
           IPA_SIZE=$(du -sh MessengerTwin.ipa | cut -f1)
           echo "IPA size: $IPA_SIZE"
 
