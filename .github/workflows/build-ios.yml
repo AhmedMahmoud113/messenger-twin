@@ -35,14 +35,14 @@ jobs:
           echo "=== Forcing Swift 5 language mode for all pod targets ==="
           # Patch all xcconfig files to force Swift 5
           find Pods/Target\ Support\ Files -name "*.xcconfig" | while read f; do
-            echo "SWIFT_VERSION = 5.0" >> "$f"
+            echo "SWIFT_VERSION = 5.9" >> "$f"
             echo "SWIFT_STRICT_CONCURRENCY = minimal" >> "$f"
           done
           echo "Patched all xcconfig files"
           # Also set SWIFT_VERSION in all pbxproj
           find Pods -name "project.pbxproj" | while read f; do
             # Replace any existing SWIFT_VERSION setting
-            sed -i '' 's/SWIFT_VERSION = [0-9.]*;/SWIFT_VERSION = 5.0;/g' "$f"
+            sed -i '' 's/SWIFT_VERSION = [0-9.]*;/SWIFT_VERSION = 5.9;/g' "$f"
             echo "Set SWIFT_VERSION=5.0 in: $f"
           done
           echo "=== Done ==="
@@ -78,7 +78,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE="" \
-            SWIFT_VERSION=5.0 \
+            SWIFT_VERSION=5.9 \
             SWIFT_STRICT_CONCURRENCY=minimal \
             2>&1 | tee build.log | tail -50
           echo ""
