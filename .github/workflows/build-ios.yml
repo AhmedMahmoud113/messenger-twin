@@ -29,22 +29,21 @@ jobs:
           cd ios
           pod install
 
-      - name: Fix Swift 6 strict concurrency in Pods
+      - name: Force Swift 5 mode for all Pods
         run: |
           cd ios
-          echo "=== Patching xcconfig files to disable strict concurrency ==="
-          find Pods/Target\ Support\ Files -name "*.xcconfig" -exec grep -l "SWIFT" {} \; | head -20 || true
-          # Add SWIFT_STRICT_CONCURRENCY=minimal to ALL pod xcconfig files
+          echo "=== Forcing Swift 5 language mode for all pod targets ==="
+          # Patch all xcconfig files to force Swift 5
           find Pods/Target\ Support\ Files -name "*.xcconfig" | while read f; do
-            if ! grep -q "SWIFT_STRICT_CONCURRENCY" "$f"; then
-              echo "SWIFT_STRICT_CONCURRENCY = minimal" >> "$f"
-            fi
+            echo "SWIFT_VERSION = 5.0" >> "$f"
+            echo "SWIFT_STRICT_CONCURRENCY = minimal" >> "$f"
           done
-          echo "Patched xcconfig files"
-          # Also patch all pbxproj files in Pods to add the setting
+          echo "Patched all xcconfig files"
+          # Also set SWIFT_VERSION in all pbxproj
           find Pods -name "project.pbxproj" | while read f; do
-            sed -i '' 's/SWIFT_OPTIMIZATION_LEVEL/SWIFT_STRICT_CONCURRENCY = minimal; SWIFT_OPTIMIZATION_LEVEL/g' "$f"
-            echo "Patched: $f"
+            # Replace any existing SWIFT_VERSION setting
+            sed -i '' 's/SWIFT_VERSION = [0-9.]*;/SWIFT_VERSION = 5.0;/g' "$f"
+            echo "Set SWIFT_VERSION=5.0 in: $f"
           done
           echo "=== Done ==="
 
@@ -79,6 +78,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE="" \
+            SWIFT_VERSION=5.0 \
             SWIFT_STRICT_CONCURRENCY=minimal \
             2>&1 | tee build.log | tail -50
           echo ""
