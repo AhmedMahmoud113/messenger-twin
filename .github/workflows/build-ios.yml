@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-ios:
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,6 +17,21 @@ jobs:
         with:
           node-version: 20
           cache: npm
+
+      - name: Select Xcode 15
+        run: |
+          # List available Xcode versions
+          ls /Applications/ | grep Xcode || true
+          # Use Xcode 15.x to avoid Swift 6 strict concurrency issues
+          XCODE_PATH=$(ls -d /Applications/Xcode_15*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            echo "Xcode 15 not found, using default Xcode"
+            xcodebuild -version
+          else
+            sudo xcode-select -s "$XCODE_PATH"
+            echo "Selected: $XCODE_PATH"
+            xcodebuild -version
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -35,18 +50,17 @@ jobs:
           set -e
           WORKSPACE=$(find ios -name "*.xcworkspace" -maxdepth 1 | head -1)
           if [ -z "$WORKSPACE" ]; then
-            echo "❌ No .xcworkspace found in ios/"
+            echo "No .xcworkspace found in ios/"
             ls -la ios/
             exit 1
           fi
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
 
-          # Extract scheme name from workspace (remove path and extension)
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           echo "scheme=$SCHEME" >> $GITHUB_OUTPUT
 
-          echo "✅ Found workspace: $WORKSPACE"
-          echo "✅ Using scheme: $SCHEME"
+          echo "Found workspace: $WORKSPACE"
+          echo "Using scheme: $SCHEME"
 
       - name: Build .app (unsigned)
         run: |
@@ -64,21 +78,20 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             PROVISIONING_PROFILE="" \
+            SWIFT_STRICT_CONCURRENCY=minimal \
             2>&1 | tee build.log | tail -50
 
           echo ""
-          echo "✅ xcodebuild finished successfully"
+          echo "xcodebuild finished successfully"
 
       - name: Package IPA
         run: |
           set -e
 
-          # Find the .app in the build output
           APP_PATH=$(find ios/build/Build/Products -name "*.app" -type d | head -1)
 
           if [ -z "$APP_PATH" ]; then
-            echo "❌ No .app found in build output"
-            echo "Build output contents:"
+            echo "No .app found in build output"
             find ios/build/Build/Products -type d 2>/dev/null || echo "No Products directory found"
             echo ""
             echo "Last 100 lines of build log:"
@@ -86,17 +99,16 @@ jobs:
             exit 1
           fi
 
-          echo "✅ Found app: $APP_PATH"
+          echo "Found app: $APP_PATH"
           APP_SIZE=$(du -sh "$APP_PATH" | cut -f1)
-          echo "📦 App size: $APP_SIZE"
+          echo "App size: $APP_SIZE"
 
-          # Create Payload structure and zip as IPA
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/
           zip -r MessengerTwin.ipa Payload
 
           IPA_SIZE=$(du -sh MessengerTwin.ipa | cut -f1)
-          echo "📦 IPA size: $IPA_SIZE"
+          echo "IPA size: $IPA_SIZE"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
